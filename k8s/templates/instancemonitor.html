@@ -1,0 +1,357 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <!-- 自定义操作按钮-->
+    <div id="toolbar" class="form-inline pull-left">
+        <div class="form-group">
+            <select id="type" class="form-control selectpicker">
+                <option value="" selected="selected">实例类型</option>
+                <option value="master">MASTER</option>
+                <option value="slave">SLAVE</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <select id="db_type" class="form-control selectpicker">
+                <option value="" selected="selected">数据库类型</option>
+                {% for name, engine in engines.items %}
+                    <option value="{{ name }}">{{ engine.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <select id="tags" class="form-control selectpicker" data-live-search="true"
+                    multiple data-selected-text-format="count > 2" data-none-selected-text="标签筛选">
+                {% for tag in tags %}
+                    <option value="{{ tag.id }}">{{ tag.tag_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <table id="instance-list" class="table table-condensed table-hover"></table>
+{% endblock %}
+
+{% block js %}
+    <script>
+        //获取列表
+        function instancelist() {
+            $('#instance-list').bootstrapTable('destroy').bootstrapTable({
+                escape: false,
+                method: 'post',
+                contentType: "application/x-www-form-urlencoded",
+                url: "/instance/list/",
+                striped: true,
+                cache: false,
+                pagination: true,
+                sortable: true,
+                sortOrder: "asc",
+                sortName: 'id',
+                sidePagination: "server",
+                pageNumber: 1,
+                pageSize: 20,
+                pageList: [20, 30, 50, 100],
+                showExport: true,
+                exportOptions: { fileName: 'instance' },
+                search: true,
+                strictSearch: false,
+                showColumns: true,
+                showRefresh: true,
+                minimumCountColumns: 2,
+                clickToSelect: true,
+                uniqueId: "id",
+                showToggle: true,
+                cardView: false,
+                detailView: false,
+                locale: 'zh-CN',
+                toolbar: "#toolbar",
+                queryParamsType: 'limit',
+                onClickSort: function() {},
+                queryParams: function (params) {
+                    return {
+                        limit: params.limit,
+                        offset: params.offset,
+                        search: params.search,
+                        instance_name: "",
+                        type: $("#type").val(),
+                        db_type: $("#db_type").val(),
+                        tags: ($("#tags").val() || []).join(','),
+                        sortName: params.sort,
+                        sortOrder: params.order,
+                        scope: 'all'
+                    }
+                },
+                columns: [
+                    {
+                        title: 'ID',
+                        field: 'id',
+                        sortable: true
+                    }, {
+                        title: '实例名称',
+                        field: 'instance_name',
+                        sortable: true,
+                        formatter: function (value, row) {
+                            return '<a target="_blank" href="/admin/sql/instance/' + row.id + '/change/">' + value + '</a>';
+                        }
+                    }, {
+                        title: '实例类型',
+                        field: 'type'
+                    }, {
+                        title: '数据库类型',
+                        field: 'db_type',
+                        sortable: true
+                    }, {
+                        title: '云厂商',
+                        field: 'cloud',
+                        formatter: function (value) {
+                            if (value === 'aws') return '<span class="label label-warning">AWS</span>';
+                            if (value === 'aliyun') return '<span class="label label-info">阿里云</span>';
+                            return value || '-';
+                        }
+                    }, {
+                        title: '健康巡检',
+                        field: 'health',
+                        formatter: function (value, row) {
+                            return '<span id="health-' + row.id + '" class="label label-default">巡检中</span>';
+                        }
+                    }, {
+                        title: '连接水位',
+                        field: 'conn_pct',
+                        sortable: false,
+                        formatter: function (value, row) {
+                            return '<span class="wm-conn" data-id="' + row.id + '">-</span>';
+                        }
+                    }, {
+                        title: 'QPS水位',
+                        field: 'qps_pct',
+                        sortable: false,
+                        formatter: function (value, row) {
+                            return '<span class="wm-qps" data-id="' + row.id + '">-</span>';
+                        }
+                    }, {
+                        title: '存储水位',
+                        field: 'disk_pct',
+                        sortable: false,
+                        formatter: function (value, row) {
+                            return '<span class="wm-disk" data-id="' + row.id + '">-</span>';
+                        }
+                    }, {
+                        title: 'CPU / 内存',
+                        field: 'spec',
+                        sortable: false,
+                        formatter: function (value, row) {
+                            return '<span class="wm-spec" data-id="' + row.id + '">-</span>';
+                        }
+                    }, {
+                        title: '延迟',
+                        field: 'latency',
+                        sortable: false,
+                        formatter: function (value, row) {
+                            return '<span class="wm-latency" data-id="' + row.id + '">-</span>';
+                        }
+                    }, {
+                        title: 'HOST',
+                        field: 'host',
+                        sortable: false
+                    }
+                ],
+                onLoadSuccess: function (res) {
+                    var rows = (res && res.rows) ? res.rows : [];
+                    window._instanceHealthRows = rows;
+
+                    /* ── 水位着色 helper ── */
+                    function level(v, maxv, pct) {
+                        if (v == null || maxv == null) return '-';
+                        var color = '#5cb85c';
+                        if (pct >= 80) color = '#d9534f';
+                        else if (pct >= 60) color = '#f0ad4e';
+                        return '<span style="color:' + color + ';font-weight:bold">' + v + ' / ' + maxv + ' (' + pct + '%)</span>';
+                    }
+
+                    function diskLevel(used, total, pct) {
+                        if (used == null || total == null) return '-';
+                        var color = '#5cb85c';
+                        if (pct >= 80) color = '#d9534f';
+                        else if (pct >= 60) color = '#f0ad4e';
+                        return '<span style="color:' + color + ';font-weight:bold">' + used + ' / ' + total + ' GB (' + pct + '%)</span>';
+                    }
+
+                    /* ── 健康巡检结果填充 ── */
+                    function applyHealth(d) {
+                        if (!d) return;
+                        var ok = d.health === 'up';
+                        var cls = ok ? 'label-success' : 'label-danger';
+                        var text = ok ? ('正常 ' + (d.latency_ms || 0) + 'ms') : '异常';
+                        $('#health-' + d.id).attr('class', 'label ' + cls).attr('title', d.msg || '').text(text);
+                        $('.wm-conn[data-id="' + d.id + '"]').html(ok ? level(d.conn, d.conn_max, d.conn_pct) : '-');
+                        $('.wm-qps[data-id="' + d.id + '"]').html(ok ? level(d.qps, d.qps_max, d.qps_pct) : '-');
+
+                        /* CPU / 内存 — 数据来自 health_batch */
+                        if (d.cpu != null && d.mem != null) {
+                            var memGb = (d.mem / 1024).toFixed(0);
+                            $('.wm-spec[data-id="' + d.id + '"]').html(d.cpu + ' 核 / ' + memGb + ' GB');
+                        }
+
+                        /* 延迟 */
+                        if (ok && d.latency_ms != null) {
+                            var lc = '#5cb85c';
+                            if (d.latency_ms >= 1000) lc = '#d9534f';
+                            else if (d.latency_ms >= 200) lc = '#f0ad4e';
+                            $('.wm-latency[data-id="' + d.id + '"]').html('<span style="color:' + lc + ';font-weight:bold">' + d.latency_ms + ' ms</span>');
+                        } else {
+                            $('.wm-latency[data-id="' + d.id + '"]').html('-');
+                        }
+
+                        /* 更新内部数据用于排序 */
+                        var tblData = $('#instance-list').bootstrapTable('getData');
+                        if (tblData) {
+                            tblData.forEach(function (item) {
+                                if (item.id === d.id) {
+                                    item.conn_pct = ok ? (parseFloat(d.conn_pct) || 0) : -1;
+                                    item.qps_pct = ok ? (parseFloat(d.qps_pct) || 0) : -1;
+                                }
+                            });
+                        }
+                    }
+
+                    /* ── 存储指标填充 ── */
+                    function applyStorage(data) {
+                        if (!data) return;
+                        for (var idStr in data) {
+                            var d = data[idStr];
+                            if (d.disk_used_gb != null && d.disk_total_gb != null) {
+                                $('.wm-disk[data-id="' + idStr + '"]').html(
+                                    diskLevel(d.disk_used_gb, d.disk_total_gb, d.disk_pct)
+                                );
+                            } else if (d.disk_total_gb != null) {
+                                /* AWS — 只有总量 */
+                                $('.wm-disk[data-id="' + idStr + '"]').html(d.disk_total_gb + ' GB (N/A)');
+                            }
+                            /* 如果有更精细的 spec 信息，覆盖 health 的简单版 */
+                            if (d.spec) {
+                                var specText = d.spec;
+                                if (d.engine) specText += ' · ' + d.engine;
+                                $('.wm-spec[data-id="' + idStr + '"]').attr('title', specText);
+                            }
+                        }
+                        /* 更新内部数据用于排序 */
+                        var tblData = $('#instance-list').bootstrapTable('getData');
+                        if (tblData) {
+                            tblData.forEach(function (item) {
+                                var sd = data[item.id];
+                                if (sd) {
+                                    item.disk_pct = sd.disk_pct != null ? parseFloat(sd.disk_pct) : -1;
+                                }
+                            });
+                        }
+                    }
+
+                    /* ── 批量健康巡检 ── */
+                    function probeBatch(refresh) {
+                        var ids = (window._instanceHealthRows || []).map(function (r) { return r.id; }).join(',');
+                        if (!ids) return;
+                        $.ajax({
+                            type: 'get',
+                            url: '/instance/health_batch/',
+                            dataType: 'json',
+                            data: {ids: ids, refresh: refresh ? 1 : 0},
+                            success: function (data) {
+                                (data.rows || []).forEach(applyHealth);
+                            },
+                            error: function () {
+                                (window._instanceHealthRows || []).forEach(function (row) {
+                                    $('#health-' + row.id).attr('class', 'label label-danger').text('异常');
+                                });
+                            }
+                        });
+                    }
+
+                    /* ── 拉取存储指标 ── */
+                    function fetchStorage() {
+                        $.ajax({
+                            type: 'get',
+                            url: '{{ storage_api_url|default:"http://39.96.66.171:8080/api/storage" }}',
+                            dataType: 'json',
+                            timeout: 30000,
+                            success: function (resp) {
+                                if (resp.status === 0 && resp.data) {
+                                    applyStorage(resp.data);
+                                }
+                            }
+                        });
+                    }
+
+                    probeBatch(false);
+                    fetchStorage();
+
+                    if (window._instanceHealthTimer) clearInterval(window._instanceHealthTimer);
+                    window._instanceHealthTimer = setInterval(function () { probeBatch(true); }, 60000);
+                    if (window._storageTimer) clearInterval(window._storageTimer);
+                    window._storageTimer = setInterval(fetchStorage, 300000);
+                },
+
+                onLoadError: onLoadErrorCallback,
+                onSearch: function (e) { queryParams(e); }
+            });
+        }
+
+        /* ── 水位列排序按钮注入 ── */
+        $(document).on('post-body.bs.table', '#instance-list', function () {
+            var sortableFields = ['conn_pct', 'qps_pct', 'disk_pct'];
+            var $hdr = $('#instance-list thead tr:first');
+            $hdr.find('th').each(function () {
+                var $th = $(this);
+                var field = $th.attr('data-field');
+                if (sortableFields.indexOf(field) >= 0) {
+                    if (!$th.find('.wm-sort-btn').length) {
+                        $th.css({'white-space': 'nowrap'});
+                        $th.find('.th-inner').css({'display': 'inline-flex', 'align-items': 'center', 'gap': '6px'});
+                        $th.find('.th-inner').append(
+                            '<span class="wm-sort-btn order" data-wm="' + field + '" style="cursor:pointer;margin-left:2px" title="点击排序">' +
+                            '<span class="caret" style="margin:0;display:block;margin-bottom:2px;border-bottom-color:#999;border-top:0;border-bottom:4px dashed"></span>' +
+                            '<span class="caret" style="margin:0;display:block;border-top-color:#999"></span></span>'
+                        );
+                    }
+                }
+            });
+        });
+
+        $(document).on('click', '.wm-sort-btn', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            var field = $(this).data('wm');
+            var $tbody = $('#instance-list').find('tbody');
+            var data = $('#instance-list').bootstrapTable('getData') || [];
+            window._wmDir = window._wmDir || {};
+            window._wmDir[field] = window._wmDir[field] === 'asc' ? 'desc' : 'asc';
+            var dir = window._wmDir[field];
+            $('.wm-sort-btn').each(function () {
+                if ($(this).data('wm') === field) {
+                    $(this).html(dir === 'desc'
+                        ? '<span class="caret" style="margin:0;border-top-color:#000"></span>'
+                        : '<span class="caret" style="margin:0;border-bottom-color:#000;border-top:0;border-bottom:4px dashed"></span>');
+                } else {
+                    $(this).html('<span class="caret" style="margin:0;display:block;margin-bottom:2px;border-bottom-color:#999;border-top:0;border-bottom:4px dashed"></span><span class="caret" style="margin:0;display:block;border-top-color:#999"></span>');
+                }
+            });
+            var idToVal = {};
+            data.forEach(function (item) { idToVal[item.id] = parseFloat(item[field]); if (isNaN(idToVal[item.id])) idToVal[item.id] = -1; });
+            var rows = $tbody.children('tr').get();
+            rows.sort(function (a, b) {
+                var idA = parseInt($(a).attr('data-uniqueid') || $(a).find('td:first').text(), 10);
+                var idB = parseInt($(b).attr('data-uniqueid') || $(b).find('td:first').text(), 10);
+                var vA = idToVal[idA] !== undefined ? idToVal[idA] : -1;
+                var vB = idToVal[idB] !== undefined ? idToVal[idB] : -1;
+                return dir === 'asc' ? vA - vB : vB - vA;
+            });
+            $.each(rows, function (i, row) { $tbody.append(row); });
+            return false;
+        });
+
+        //筛选变动自动刷新
+        $("#type").change(function () { instancelist(); });
+        $("#db_type").change(function () { instancelist(); });
+        $("#tags").change(function () { instancelist(); });
+
+        //初始化数据
+        $(document).ready(function () { instancelist(); });
+    </script>
+{% endblock %}

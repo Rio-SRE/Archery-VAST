@@ -1,0 +1,7 @@
+用户ID,用户名,姓名/花名,邮箱,账号开通时间,所属角色,是否活跃,是否超级管理员
+1,admin,,admin@cloudops.local,2026-08-20 12:34,DBA,是,是
+2,dba1,DBA-chenchen,chenchen@vast.com,2026-08-21 12:11,DBA,是,否
+3,dev1,开发-zhengyu,zhengyu@vast.com,2026-08-21 12:11,Developer,是,否
+4,dev2,开发-yingjie,yingjie@vast.com,2026-08-21 12:11,Developer,是,否
+5,qa1,测试-zhangbo,zhangbo@vast.com,2026-08-21 12:11,QA,是,否
+6,dev_lead,研发负责人-zhengyu,zhengyu@vast.com,2026-08-21 12:13,"DBA,Dev-Lead,Developer,QA",是,否

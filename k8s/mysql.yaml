@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archery-mysql-pvc
+  namespace: archery
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp2
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archery-mysql
+  namespace: archery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: archery-mysql
+  template:
+    metadata:
+      labels:
+        app: archery-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archery-secrets
+                  key: mysql-root-password
+            - name: MYSQL_DATABASE
+              value: archery
+            - name: MYSQL_CHARACTER_SET_SERVER
+              value: utf8mb4
+            - name: MYSQL_COLLATION_SERVER
+              value: utf8mb4_general_ci
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: archery-mysql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: archery-mysql
+  namespace: archery
+spec:
+  selector:
+    app: archery-mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+  type: ClusterIP

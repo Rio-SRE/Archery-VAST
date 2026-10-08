@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+mysql_data/
+archery_downloads/
+archery_logs/
+kubectl
+credentials/aws.cfg
+credentials/aliyun.cfg
+credentials/baidu.cfg
+archery-mcp/.env

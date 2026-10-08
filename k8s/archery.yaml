@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archery
+  namespace: archery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: archery
+  template:
+    metadata:
+      labels:
+        app: archery
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z archery-mysql 3306; do echo waiting for mysql; sleep 2; done']
+        - name: patch-monitor
+          image: hhyo/archery:v1.10.0
+          command: ['sh', '/opt/patches/patch-monitor.sh']
+          volumeMounts:
+            - name: archery-patch
+              mountPath: /opt/archery-patch
+            - name: patch-scripts
+              mountPath: /opt/patches
+      containers:
+        - name: archery
+          image: hhyo/archery:v1.10.0
+          ports:
+            - containerPort: 9123
+          env:
+            - name: NGINX_PORT
+              value: "9123"
+            - name: DATABASE_URL
+              value: "mysql://root:Archery@2026!@archery-mysql:3306/archery"
+            - name: REDIS_URL
+              value: "redis://archery-redis:6379/0"
+            - name: CACHE_URL
+              value: "redis://archery-redis:6379/0"
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archery-secrets
+                  key: archery-secret-key
+          volumeMounts:
+            - name: monitor-template
+              mountPath: /opt/archery/sql/templates/instancemonitor.html
+              subPath: instancemonitor.html
+            - name: archery-patch
+              mountPath: /opt/archery/sql/views.py
+              subPath: views.py
+            - name: archery-patch
+              mountPath: /opt/archery/sql/urls.py
+              subPath: urls.py
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: monitor-template
+          configMap:
+            name: archery-monitor-template
+        - name: patch-scripts
+          configMap:
+            name: archery-patch-scripts
+            defaultMode: 0755
+        - name: archery-patch
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: archery
+  namespace: archery
+spec:
+  selector:
+    app: archery
+  ports:
+    - port: 9123
+      targetPort: 9123
+  type: LoadBalancer
